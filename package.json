@@ -1,0 +1,17 @@
+{
+  "name": "livepoll",
+  "version": "1.0.1",
+  "description": "Live polling app using node.js architect as backend & hyperapp frontend",
+  "scripts": {
+    "postinstall": "create --local",
+    "db-admin": "DYNAMO_ENDPOINT=http://localhost:5000 dynamodb-admin",
+    "start": "hydrate && sandbox"
+  },
+  "keywords": [],
+  "author": "Adrien Gibrat <adrien.gibrat@gmail.com>",
+  "license": "WTFPL",
+  "devDependencies": {
+    "@architect/architect": "^5.8.6",
+    "dynamodb-admin": "^3.1.3"
+  }
+}
