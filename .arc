@@ -9,8 +9,8 @@ runtime nodejs8.10
 @ws
 
 @http
-get /admin
 get /
+get /admin
 get /api/polls
 get /api/polls/:pollId
 put /api/polls/:pollId

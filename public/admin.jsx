@@ -30,6 +30,10 @@ const _updatePoll = (polls, poll) => {
 	const index = polls.findIndex(({ pollId }) => pollId === poll.pollId)
 	return Object.assign(polls, { [index === -1 ? polls.length : index]: poll })
 }
+const createPoll = (_state, poll) => {
+	event.preventDefault()
+	return [ save, poll ]
+}
 const save = (state, poll) => [ { polls: _updatePoll(state.polls, poll), syncing: true }, [
 	dispatch => http.put(`/api/polls/${poll.pollId}`, { body: poll })
 			.then(() => dispatch(update, { syncing: false }))
@@ -41,71 +45,83 @@ const del = (state, poll) => !confirm('delete?') ?  state : [ { polls: state.pol
 			.catch(() => dispatch(state))
 ] ]
 
+// https://codepen.io/retrofuturistic/pen/tlbHE
+
+// Components helpers
+
+const _set = (poll, path) => (state, setter) => (Object.assign(poll, lens(path)(setter)(poll)), state)
+const _sync = poll => path => (_state, setter) => [ save, lens(path)(setter)(poll) ]
+const _remove = index => event => {
+	event.preventDefault()
+	return confirm('delete?') ? x => (x.splice(index, 1), x) : _identity
+}
+const _activate = index => questions => questions.map((q, i) => ({ ...q, active: index === i }))
+
 // Form input value sync helper
 const _constant = x => () => x
 const _identity =  x => x
-const _append = map => value => (x = []) => x.concat(map(value))
-const _value = map => event => map(event.target.value)
+const _append = fn => value => (x = []) => x.concat(fn(value))
+const _value = fn => event => fn(event.target.value)
+const _checked = fn => event => fn(!!event.target.checked)
 
 const withValue = _value(_constant)
-const appendValue = _value(_append(_identity))
-const appendMapedValue = map => _value(_append(map))
-
-// https://codepen.io/retrofuturistic/pen/tlbHE
+const withMapedValue = fn => _value(fn)
+const appendMapedValue = fn => _value(_append(fn))
+const withChecked = _checked(_constant)
 
 // Components
-const PollForm = ({ poll = {} }) => {
-	const { pollId, title, styleUrl, questions } = poll
-	const submit = (_state, event) => {
-		event.preventDefault()
-		const data = new FormData(event.target.form || event.target)
-		return [ save, { pollId: data.get('pollId'), title: data.get('title'), styleUrl: data.get('styleUrl'), questions } ]
-	}
-	const sync = (path) => (_state, setter) => [ save, lens(path)(setter)(poll) ]
-	return <form onsubmit={ submit }>
-		{ pollId ? <div><h2>{ pollId }</h2><a class="delete" onclick={ [ del, poll ] }>delete</a></div> : '' }
-		<input type={ pollId ? 'hidden' : 'text' } required name="pollId" pattern="[\w\d-]+" placeholder="Id (ex: project-1) used in URL" value={ pollId } />
-		<textarea required name="title" placeholder="Title" onchange={ pollId && [ sync('title'), withValue ] }>{ title }</textarea>
-		<input type="text" name="styleUrl" pattern="(https:)?//" placeholder="optional css URL" value={ styleUrl } onchange={ pollId && submit } />
-		{ pollId ? <Questions pollId={ pollId } questions={ questions } sync={ sync } /> : <button type="submit">Create new poll</button> }
+const PollCreate = (poll = { questions: [] }) =>
+	<form onsubmit={ [ createPoll, poll ] }>
+		<input type="text" class="short" required pattern="[\w\d-]+" placeholder="Id (ex: project-1) used in URL" onchange={ [ _set(poll, 'pollId'), withValue ] } value="" />
+		<textarea required placeholder="Title" onchange={ [ _set(poll, 'title'), withValue ] } value=""></textarea>
+		<input type="text" pattern="(https:)?//" placeholder="optional css URL" onchange={ [ _set(poll, 'styleUrl'), withValue ] } value="" />
+		<button type="submit">Create new poll</button>
+		{ JSON.stringify(poll) }
 	</form>
-}
 
-const Questions = ({ sync, pollId, questions = [] }) => {
-	const _delete = index => event => {
-		event.preventDefault()
-		return confirm('delete?') ? x => (x.splice(index, 1), x) : _identity
-	}
-	const _activate = index => questions => questions.map((q, i) => ({ ...q, active: index === i }))
+const PollEdit = ({ poll }) => {
+	const { pollId, active, title, styleUrl, questions } = poll
+	const syncPoll = _sync(poll)
+	return <div>
+		<input type="checkbox" class="switch" checked={ active } onchange={ [ syncPoll('active'), withChecked ] } id={ pollId } />
+		<label for={ pollId }></label>
+		<form onsubmit={ (_state, event)=> { event.preventDefault() } }>
+			<h2>{ pollId }</h2>
+			<a class="delete" onclick={ [ del, poll ] }>delete</a>
+			<fieldset disabled={ active }>
+				<textarea required name="title" placeholder="Title" onchange={ [ syncPoll('title'), withValue ] }>{ title }</textarea>
+				<input type="text" name="styleUrl" pattern="(https:)?//" placeholder="optional css URL" value={ styleUrl } onchange={ [ syncPoll('styleUrl'), withValue ] } />
+				<Questions sync={ syncPoll } questions={ questions } />
+			</fieldset>
+		</form>
+	</div>
+}
+const Questions = ({ sync, questions = [] }) => {
+	let total
 	return <ol class="questions" start="-1">
 		<li type="none">
 			<input type="text" placeholder="New question" value="" onchange={ [ sync('questions'), appendMapedValue(text => ({ text, options: [] })) ] } />
 		</li>
-		<label class="deactivate">
-			<li type="none">
-				<input hidden type="radio" name={ pollId } onchange={ [ sync('questions'), () => _activate(-1) ] } />
-				no active question
-			</li>
-		</label>
+		<li type="none" class="deactivate" onclick={ [ sync('questions'), () => _activate(-1) ] }>
+			no active question
+		</li>
 		{ questions.map(({ text, options, active }, questionIndex) =>
-		<label>
-			<input hidden type="radio" name={ pollId } checked={ active } onchange={ [ sync('questions'), () => _activate(questionIndex) ] } />
-			<li type="1" class={ active ? 'active' : '' } >
-				<input type="text" required placeholder="Question" value={ text } onchange={ [ sync(`questions.${questionIndex}.text`), withValue ] } />
-				<a class="delete" onclick={ [ sync(`questions`), _delete(questionIndex) ] } >delete</a>
-				<ol class="options" start="0">
-					<li type="none">
-						<input type="text" placeholder="New option" value="" onchange={ [ sync(`questions.${questionIndex}.options`), appendValue ] } />
-					</li>{
-					options.map((option, optionIndex) =>
-					<li type="a">
-						<input type="text" required placeholder="Option" value={ option } onchange={ [ sync(`questions.${questionIndex}.options.${optionIndex}`), withValue ] } />
-						<a class="delete" onclick={ [ sync(`questions.${questionIndex}.options`), _delete(optionIndex) ] } >delete</a>
-						<br/><progress value="1" max="2" />0/0
-					</li>) }
-				</ol>
-			</li>
-		</label>
+		<li type="1" class={ active ? 'active' : '' } onclick={ [ sync('questions'), () => _activate(questionIndex) ] }>
+			<input type="text" required placeholder="Question" value={ text } onchange={ [ sync(`questions.${questionIndex}.text`), withValue ] } />
+			<a class="delete" onclick={ [ sync(`questions`), _remove(questionIndex) ] } >delete</a>
+			<ol class="options" start="0">
+				<li type="none">
+					<input type="text" placeholder="New option" value="" onchange={ [ sync(`questions.${questionIndex}.options`), appendMapedValue(text => ({ text, score: 0 })) ] } />
+				</li>{(
+				(total = options.reduce((sum, option) => sum + option.score, 0)),
+				options.map(({ text, score }, optionIndex) =>
+				<li type="a">
+					<input type="text" required placeholder="Option" value={ text } onchange={ [ sync(`questions.${questionIndex}.options.${optionIndex}`), withMapedValue(text => ({ text, score })) ] } />
+					<a class="delete" onclick={ [ sync(`questions.${questionIndex}.options`), _remove(optionIndex) ] } >delete</a>
+					<br/><progress value={ score } max={ total } /> { score } / { total }
+				</li>))}
+			</ol>
+		</li>
 		) }
 	</ol>
 }
@@ -121,9 +137,9 @@ app({
 	],
 	view: ({ polls, syncing }) =>
 		<main class={ syncing ? 'syncing' : '' }>
-			<PollForm />
+			<PollCreate />
 			<hr/>
-			{ polls.map(poll => <PollForm poll={ poll } /> ) }
+			{ polls.map(poll => <PollEdit poll={ poll } /> ) }
 		</main>
 	,
 	node: document.getElementById('app')
